@@ -8,16 +8,13 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
-# --- DATABASE CONNECTION (AMAN & PROFESIONAL) ---
+# --- DATABASE CONNECTION ---
 def get_db_connection():
     try:
-        # Mengambil URL Database dari Settingan Render (Environment Variable)
         db_url = os.environ.get('DATABASE_URL')
-        
         if not db_url:
             print("❌ ERROR: DATABASE_URL is missing!")
             return None
-            
         conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
         return conn
     except Exception as e:
@@ -74,7 +71,7 @@ def get_insurances():
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 3: TARIK RESEP (FITUR UNGGULAN) ---
+# --- API 3: TARIK RESEP ---
 @app.route('/api/get-prescription', methods=['GET'])
 def get_prescription():
     patient_id = request.args.get('patient_id')
@@ -83,7 +80,6 @@ def get_prescription():
 
     try:
         cur = conn.cursor()
-        # Cari resep status 'WAITING PAYMENT'
         cur.execute("""
             SELECT id FROM prescriptions 
             WHERE patient_id = %s AND status = 'WAITING PAYMENT'
@@ -95,7 +91,6 @@ def get_prescription():
         if not presc:
             return jsonify({'found': False, 'message': 'Tidak ada resep baru untuk pasien ini.'})
 
-        # Ambil detail obat
         presc_id = presc['id']
         cur.execute("""
             SELECT 
@@ -111,7 +106,6 @@ def get_prescription():
         
         items = cur.fetchall()
         
-        # Update status agar tidak ketarik double
         cur.execute("UPDATE prescriptions SET status = 'PROCESSED' WHERE id = %s", (presc_id,))
         conn.commit()
         
@@ -122,7 +116,7 @@ def get_prescription():
     except Exception as e:
         return jsonify({'found': False, 'message': str(e)}), 500
 
-# --- API 4: INPUT ITEM MANUAL ---
+# --- API 4: INPUT ITEM MANUAL (FIXED: NO DRUGS, ONLY ICD) ---
 @app.route('/api/master-data', methods=['GET'])
 def search_master_data():
     query = request.args.get('q', '').lower()
@@ -134,29 +128,31 @@ def search_master_data():
         search_term = f"%{query}%"
         results = []
         
-        # Cari Obat
+        # 1. Cari ICD-10 (Diagnosa)
         cur.execute("""
-            SELECT name, selling_price as price, 'drug' as type, kfa_code as code 
-            FROM medicines 
-            WHERE name ILIKE %s AND is_active = true LIMIT 5
-        """, (search_term,))
-        results.extend(cur.fetchall())
-        
-        # Cari Tindakan
-        cur.execute("""
-            SELECT name, price, 'procedure' as type, code 
+            SELECT name, price, 'icd10' as type, code 
             FROM tariff_icd10 
-            WHERE name ILIKE %s LIMIT 5
-        """, (search_term,))
+            WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
+        """, (search_term, search_term))
+        results.extend(cur.fetchall())
+
+        # 2. Cari ICD-9 (Prosedur/Tindakan) -> INI YANG BARU DITAMBAHKAN
+        cur.execute("""
+            SELECT name, price, 'icd9' as type, code 
+            FROM tariff_icd9 
+            WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
+        """, (search_term, search_term))
         results.extend(cur.fetchall())
         
+        # (OBAT SUDAH DIHAPUS DARI SINI)
+
         cur.close()
         conn.close()
         return jsonify(results)
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 5: SIMPAN INVOICE & BAYAR ---
+# --- API 5: CREATE INVOICE ---
 @app.route('/api/create-invoice', methods=['POST'])
 def create_invoice():
     data = request.json
@@ -171,28 +167,26 @@ def create_invoice():
     try:
         cur = conn.cursor()
         
-        # 1. Header Invoice
         invoice_id = str(uuid.uuid4())
         cur.execute("""
             INSERT INTO invoices (id, patient_id, status, created_at, total_amount)
             VALUES (%s, %s, 'paid', NOW(), %s)
         """, (invoice_id, patient_id, total_final))
         
-        # 2. Detail Invoice
         for item in items:
             price = float(item['price'])
             qty = int(item['qty'])
             subtotal = price * qty
             
+            # Type akan otomatis tersimpan sebagai 'icd10' atau 'icd9'
             cur.execute("""
                 INSERT INTO invoice_details (id, invoice_id, item_type, item_code, item_name, price, qty, subtotal)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                str(uuid.uuid4()), invoice_id, item.get('type', 'drug'),
+                str(uuid.uuid4()), invoice_id, item.get('type', 'manual'),
                 item.get('code', '-'), item['name'], price, qty, subtotal
             ))
 
-        # 3. Payment Record
         cur.execute("""
             INSERT INTO payments (id, invoice_id, amount, method, created_at)
             VALUES (%s, %s, %s, 'CASH', NOW())
