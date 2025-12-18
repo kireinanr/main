@@ -158,7 +158,7 @@ def search_master_data():
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 5: CREATE INVOICE ---
+# --- API 5: CREATE INVOICE (FIX: HAPUS SUBTOTAL DARI INSERT) ---
 @app.route('/api/create-invoice', methods=['POST'])
 def create_invoice():
     data = request.json
@@ -173,25 +173,28 @@ def create_invoice():
     try:
         cur = conn.cursor()
         
+        # 1. Header Invoice
         invoice_id = str(uuid.uuid4())
         cur.execute("""
             INSERT INTO invoices (id, patient_id, status, created_at, total_amount)
             VALUES (%s, %s, 'paid', NOW(), %s)
         """, (invoice_id, patient_id, total_final))
         
+        # 2. Detail Invoice
         for item in items:
             price = float(item['price'])
             qty = int(item['qty'])
-            subtotal = price * qty
+            # subtotal dihitung otomatis oleh database, jadi TIDAK PERLU dikirim
             
             cur.execute("""
-                INSERT INTO invoice_details (id, invoice_id, item_type, item_code, item_name, price, qty, subtotal)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO invoice_details (id, invoice_id, item_type, item_code, item_name, price, qty)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 str(uuid.uuid4()), invoice_id, item.get('type', 'manual'),
-                item.get('code', '-'), item['name'], price, qty, subtotal
+                item.get('code', '-'), item['name'], price, qty
             ))
 
+        # 3. Payment Record
         cur.execute("""
             INSERT INTO payments (id, invoice_id, amount, method, created_at)
             VALUES (%s, %s, %s, 'CASH', NOW())
