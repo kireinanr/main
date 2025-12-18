@@ -1,0 +1,16 @@
+# --- TESTING ---
+if __name__ == "__main__":
+    billing = BillingSystem()
+    
+
+    test_patient_id = "6265498e-bcf3-4d00-92e0-296a46f0384f"
+    
+    request_data = InvoiceRequest(
+        patient_id=test_patient_id, 
+        items=[
+            BillItem(type="icd9", code="39.95", qty=1),
+            BillItem(type="drug", code="PCT-500", qty=10, price_per_unit=Decimal(500))
+        ]
+    )
+    
+    billing.create_invoice(request_data)
