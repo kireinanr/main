@@ -47,7 +47,7 @@
                 <div class="mb-5 relative">
                     <label class="block text-sm font-bold mb-1 text-slate-700">Cari Pasien</label>
                     <div class="relative group">
-                        <input type="text" id="search-patient" class="w-full border border-gray-300 bg-gray-50 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none text-sm transition-all shadow-sm group-hover:border-blue-300" placeholder="Ketik nama / RM..." onkeyup="searchPatient(this.value)">
+                        <input type="text" id="search-patient" class="w-full border border-gray-300 bg-gray-50 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none text-sm transition-all shadow-sm group-hover:border-blue-300" placeholder="Ketik nama / RM" onkeyup="searchPatient(this.value)">
                         <i class="fa-solid fa-user-magnifying-glass absolute right-3 top-3 text-gray-400 text-sm"></i>
                     </div>
                     <div id="list-patient" class="dropdown-menu shadow-xl mt-1 rounded-lg text-sm"></div>
@@ -73,7 +73,7 @@
                 <div class="mb-5">
                     <label class="block text-sm font-bold mb-1 text-slate-700">Penjamin / Asuransi</label>
                     <div class="relative">
-                        <select id="select-insurance" class="w-full border border-gray-300 bg-white p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none cursor-pointer hover:border-blue-300 transition-colors shadow-sm" onchange="recalculate()">
+                        <select id="select-insurance" class="w-full appearance-none border border-gray-300 bg-white p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none cursor-pointer hover:border-blue-300 transition-colors shadow-sm" onchange="recalculate()">
                             <option value="umum" data-pct="0">UMUM / BAYAR MANDIRI</option>
                         </select>
                         <div class="absolute right-3 top-1/2 -translate-y-1/2 bg-white px-1 pointer-events-none">
@@ -97,7 +97,7 @@
             <div class="bg-white rounded-xl shadow-md border flex-1 flex flex-col overflow-hidden">
                 <div class="p-3 border-b bg-white flex justify-between items-center shadow-sm z-10 h-14">
                     <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-                        <span class="bg-blue-100 text-blue-600 w-8 h-8 flex items-center justify-center rounded-md"><i class="fa-solid fa-list-check text-sm"></i></span>
+                        <span class="bg-emerald-100 text-emerald-700 w-8 h-8 flex items-center justify-center rounded-md"><i class="fa-solid fa-list-check text-sm"></i></span>
                         Rincian Tagihan
                     </h3>
                     <button onclick="resetCart()" class="text-red-500 text-sm font-bold hover:bg-red-50 px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5">
