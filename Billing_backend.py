@@ -1,175 +1,220 @@
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
+import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import uuid
-import os
-import decimal
 
 app = Flask(__name__)
 CORS(app)
 
-# --- ROOT ROUTE ---
+# Database Connection
+def get_db_connection():
+    try:
+        db_url = os.environ.get('DATABASE_URL')
+        if not db_url:
+            print("❌ ERROR: DATABASE_URL is missing!")
+            return None
+        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        print(f"❌ DB Connection Error: {e}")
+        return None
+
 @app.route('/')
 def home():
-    return send_file('Billing_frontend.html') 
+    return "Billing Server is Running & Ready!"
 
-class Database:
-    def __init__(self):
-        self.db_host = "aws-1-ap-south-1.pooler.supabase.com"
-        self.db_port = "5432"
-        self.db_name = "postgres"
-        self.db_user = "postgres.esmhvcfemenpmpciiucz"
-        self.db_pass = "SEMOGADAPATA"
-    
-    def get_connection(self):
-        dsn = f"postgresql://{self.db_user}:{self.db_pass}@{self.db_host}:{self.db_port}/{self.db_name}?sslmode=require"
-        return psycopg2.connect(dsn)
-
-# API CARI PASIEN
+# --- API 1: CARI PASIEN ---
 @app.route('/api/patients', methods=['GET'])
 def search_patients():
-    q = request.args.get('q', '')
-    conn = Database().get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    query = request.args.get('q', '')
+    conn = get_db_connection()
+    if not conn: return jsonify([]), 500
+    
     try:
-        cur.execute("SELECT id, full_name, mr_no FROM patients WHERE full_name ILIKE %s OR mr_no ILIKE %s LIMIT 5", (f"%{q}%", f"%{q}%"))
-        return jsonify(cur.fetchall())
-    finally:
-        conn.close()
-
-# API CARI ICD (MANUAL)
-@app.route('/api/master-data', methods=['GET'])
-def search_master():
-    q = request.args.get('q', '')
-    conn = Database().get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        sql = "SELECT id::text, code, name, price, 'icd10' as type FROM tariff_icd10 WHERE name ILIKE %s OR code ILIKE %s UNION ALL SELECT id::text, code, name, price, 'icd9' as type FROM tariff_icd9 WHERE name ILIKE %s OR code ILIKE %s LIMIT 20"
-        wildcard = f"%{q}%"
-        cur.execute(sql, (wildcard, wildcard, wildcard, wildcard))
-        
-        raw_items = cur.fetchall()
-        clean_items = []
-        for item in raw_items:
-            i = dict(item)
-            i['price'] = float(i['price']) if i['price'] else 0.0
-            clean_items.append(i)
-        return jsonify(clean_items)
-    finally:
-        conn.close()
-
-# --- FIX FINAL: GET RESEP (Dengan Kategori Obat) ---
-@app.route('/api/get-prescription', methods=['GET'])
-def get_patient_prescription():
-    patient_id = request.args.get('patient_id')
-    conn = Database().get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        # UPDATE SQL: Kita ambil kolom 'm.drug_category'
+        cur = conn.cursor()
         sql = """
-            SELECT 
-                m.kfa_code as code, 
-                m.name, 
-                m.drug_category,   -- INI YANG KITA TAMBAHKAN
-                pd.qty,
-                pd.subtotal,       
-                pd.price_snapshot, 
-                m.selling_price,    
-                'drug' as type
-            FROM prescriptions p
-            JOIN visits v ON p.visit_id = v.id
-            JOIN prescription_details pd ON p.id = pd.prescription_id
-            JOIN medicines m ON pd.medicine_id = m.id
-            WHERE v.patient_id = %s AND p.status = 'WAITING PAYMENT'
+            SELECT id, full_name, mr_no, address 
+            FROM patients 
+            WHERE full_name ILIKE %s OR mr_no ILIKE %s 
+            LIMIT 10
         """
-        cur.execute(sql, (patient_id,))
-        items = cur.fetchall()
-        
-        safe_items = []
-        for i in items:
-            row = dict(i)
-            qty = int(row['qty']) if row['qty'] and row['qty'] > 0 else 1
-            final_unit_price = 0.0
-
-            # Logika Harga (Subtotal -> Snapshot -> Master)
-            if row['subtotal'] is not None and float(row['subtotal']) > 0:
-                final_unit_price = float(row['subtotal']) / qty
-            elif row['price_snapshot'] is not None and float(row['price_snapshot']) > 0:
-                 final_unit_price = float(row['price_snapshot'])
-            elif row['selling_price'] is not None:
-                final_unit_price = float(row['selling_price'])
-            
-            row['price'] = final_unit_price
-            row['qty'] = qty
-            
-            # Pastikan kategori ada (default 'non-generik' jika kosong)
-            if not row.get('drug_category'):
-                row['drug_category'] = 'non-generik'
-            
-            # Bersihkan data mentah
-            row.pop('subtotal', None); row.pop('price_snapshot', None); row.pop('selling_price', None)
-            safe_items.append(row)
-
-        if not safe_items: 
-            return jsonify({"found": False, "message": "Tidak ada resep WAITING PAYMENT."})
-            
-        return jsonify({"found": True, "items": safe_items})
-    finally:
+        search_term = f"%{query}%"
+        cur.execute(sql, (search_term, search_term))
+        results = cur.fetchall()
+        cur.close()
         conn.close()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify([]), 500
 
-# API ASURANSI
+# --- API 2: LIST ASURANSI ---
 @app.route('/api/insurances', methods=['GET'])
 def get_insurances():
-    conn = Database().get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        cur.execute("SELECT i.id, i.name, COALESCE(ic.coverage_percentage, 100) as pct FROM insurances i LEFT JOIN insurance_coverages ic ON i.id = ic.insurance_id")
-        return jsonify(cur.fetchall())
-    finally:
-        conn.close()
+    conn = get_db_connection()
+    if not conn: return jsonify([]), 500
 
-# API SIMPAN TAGIHAN
-# --- FUNGSI SIMPAN TAGIHAN (FIX: Subtotal Otomatis by Database) ---
+    try:
+        cur = conn.cursor()
+        # Ambil data asuransi dan persentase coverage (default 0 jika null)
+        cur.execute("""
+            SELECT i.id, i.name, COALESCE(ic.coverage_percentage, 0) as pct
+            FROM insurances i
+            LEFT JOIN insurance_coverages ic ON i.id = ic.insurance_id
+            WHERE i.is_active = true 
+            ORDER BY i.name ASC
+        """)
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify([]), 500
+
+# --- API 3: TARIK RESEP DARI DOKTER (PENTING!) ---
+@app.route('/api/get-prescription', methods=['GET'])
+def get_prescription():
+    patient_id = request.args.get('patient_id')
+    conn = get_db_connection()
+    if not conn: return jsonify({'found': False, 'message': 'DB Error'}), 500
+
+    try:
+        cur = conn.cursor()
+        # 1. Cari Resep Terakhir Pasien yang Statusnya 'WAITING PAYMENT'
+        cur.execute("""
+            SELECT id FROM prescriptions 
+            WHERE patient_id = %s AND status = 'WAITING PAYMENT'
+            ORDER BY created_at DESC LIMIT 1
+        """, (patient_id,))
+        
+        presc = cur.fetchone()
+        
+        if not presc:
+            return jsonify({'found': False, 'message': 'Tidak ada resep baru untuk pasien ini.'})
+
+        # 2. Ambil Detail Obatnya
+        presc_id = presc['id']
+        cur.execute("""
+            SELECT 
+                m.name, 
+                m.drug_category, 
+                pd.qty, 
+                pd.price_snapshot as price,
+                m.kfa_code as code
+            FROM prescription_details pd
+            JOIN medicines m ON pd.medicine_id = m.id
+            WHERE pd.prescription_id = %s
+        """, (presc_id,))
+        
+        items = cur.fetchall()
+        
+        # 3. Update Status Resep jadi 'PROCESSED' agar tidak ditarik 2 kali
+        cur.execute("UPDATE prescriptions SET status = 'PROCESSED' WHERE id = %s", (presc_id,))
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        return jsonify({'found': True, 'items': items})
+
+    except Exception as e:
+        print(e)
+        return jsonify({'found': False, 'message': str(e)}), 500
+
+# --- API 4: CARI ITEM MANUAL (Master Data) ---
+@app.route('/api/master-data', methods=['GET'])
+def search_master_data():
+    query = request.args.get('q', '').lower()
+    conn = get_db_connection()
+    if not conn: return jsonify([]), 500
+
+    try:
+        cur = conn.cursor()
+        search_term = f"%{query}%"
+        
+        results = []
+        
+        # A. Cari Obat
+        cur.execute("""
+            SELECT name, selling_price as price, 'drug' as type, kfa_code as code 
+            FROM medicines 
+            WHERE name ILIKE %s AND is_active = true LIMIT 5
+        """, (search_term,))
+        results.extend(cur.fetchall())
+        
+        # B. Cari Tindakan (ICD 10 Tariff)
+        cur.execute("""
+            SELECT name, price, 'procedure' as type, code 
+            FROM tariff_icd10 
+            WHERE name ILIKE %s LIMIT 5
+        """, (search_term,))
+        results.extend(cur.fetchall())
+        
+        cur.close()
+        conn.close()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify([]), 500
+
+# --- API 5: BUAT INVOICE ---
 @app.route('/api/create-invoice', methods=['POST'])
 def create_invoice():
     data = request.json
-    conn = Database().get_connection()
-    cur = conn.cursor()
+    patient_id = data.get('patient_id')
+    items = data.get('items', [])
+    total_final = data.get('total_final', 0)
+
+    if not patient_id or not items:
+        return jsonify({'success': False, 'error': 'Data tidak lengkap'}), 400
+
+    conn = get_db_connection()
     try:
-        # 1. Buat ID Invoice & Detail ID
-        new_id = str(uuid.uuid4())
+        cur = conn.cursor()
         
-        # 2. Simpan Header Invoice
+        # 1. Header Invoice
+        invoice_id = str(uuid.uuid4())
         cur.execute("""
-            INSERT INTO invoices (id, patient_id, total_amount, status) 
-            VALUES (%s, %s, %s, 'unpaid')
-        """, (new_id, data['patient_id'], data['total_final']))
+            INSERT INTO invoices (id, patient_id, status, created_at, total_amount)
+            VALUES (%s, %s, 'paid', NOW(), %s)
+        """, (invoice_id, patient_id, total_final))
         
-        # 3. Simpan Detail Item (TANPA SUBTOTAL)
-        # Database akan menghitung subtotal sendiri: price * qty
-        for item in data['items']:
-            detail_id = str(uuid.uuid4())
-            safe_price = float(item['price']) if item['price'] else 0.0
+        # 2. Detail Invoice
+        for item in items:
+            # Pastikan harga dan qty aman
+            price = float(item['price'])
             qty = int(item['qty'])
-
-            # HAPUS 'subtotal' DARI SINI
+            subtotal = price * qty
+            
             cur.execute("""
-                INSERT INTO invoice_details 
-                (id, invoice_id, item_type, item_code, item_name, price, qty) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (detail_id, new_id, item['type'], item['code'], item['name'], safe_price, qty))
-        
-        conn.commit()
-        return jsonify({"success": True, "invoice_id": new_id})
+                INSERT INTO invoice_details (id, invoice_id, item_type, item_code, item_name, price, qty, subtotal)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()), 
+                invoice_id, 
+                item.get('type', 'drug'),
+                item.get('code', '-'), 
+                item['name'], 
+                price, 
+                qty, 
+                subtotal
+            ))
 
-    except Exception as e:
-        conn.rollback()
-        print(f"❌ ERROR SAVE: {e}") 
-        return jsonify({"success": False, "error": str(e)}), 500
-    finally:
+        # 3. Simpan Pembayaran (Langsung Lunas)
+        cur.execute("""
+            INSERT INTO payments (id, invoice_id, amount, method, created_at)
+            VALUES (%s, %s, %s, 'CASH', NOW())
+        """, (str(uuid.uuid4()), invoice_id, total_final))
+
+        conn.commit()
+        cur.close()
         conn.close()
 
+        return jsonify({'success': True, 'invoice_id': invoice_id})
+
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
-    print("🚀 SERVER BILLING (Port 5000)...")
-    app.run(port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

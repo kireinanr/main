@@ -152,7 +152,7 @@
 
     <script>
         // --- KONFIGURASI API ---
-        const API = "https://main-19tx.onrender.com/";
+        const API = "https://main-19tx.onrender.com/api";
         const fmtMoney = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n);
 
         let selectedPatient = null;
@@ -363,7 +363,6 @@
             try {
                 const payload = { 
                     patient_id: selectedPatient.id, 
-                    insurance_id: document.getElementById('select-insurance').value,
                     total_final: window.finalData.total_final, 
                     items: window.finalData.items 
                 };
