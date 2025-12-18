@@ -71,7 +71,7 @@ def get_insurances():
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 3: TARIK RESEP ---
+# --- API 3: TARIK RESEP (UPDATE: AMBIL PROCESSED -> UBAH JADI BILLED) ---
 @app.route('/api/get-prescription', methods=['GET'])
 def get_prescription():
     patient_id = request.args.get('patient_id')
@@ -80,17 +80,20 @@ def get_prescription():
 
     try:
         cur = conn.cursor()
+        
+        # 1. Cari resep yang statusnya 'PROCESSED' (Siap Bayar)
         cur.execute("""
             SELECT id FROM prescriptions 
-            WHERE patient_id = %s AND status = 'WAITING PAYMENT'
+            WHERE patient_id = %s AND status = 'PROCESSED'
             ORDER BY created_at DESC LIMIT 1
         """, (patient_id,))
         
         presc = cur.fetchone()
         
         if not presc:
-            return jsonify({'found': False, 'message': 'Tidak ada resep baru untuk pasien ini.'})
+            return jsonify({'found': False, 'message': 'Tidak ada resep siap bayar (PROCESSED) untuk pasien ini.'})
 
+        # 2. Ambil detail obat
         presc_id = presc['id']
         cur.execute("""
             SELECT 
@@ -106,7 +109,8 @@ def get_prescription():
         
         items = cur.fetchall()
         
-        cur.execute("UPDATE prescriptions SET status = 'PROCESSED' WHERE id = %s", (presc_id,))
+        # 3. Update status menjadi 'BILLED' agar tidak ditarik berulang kali
+        cur.execute("UPDATE prescriptions SET status = 'BILLED' WHERE id = %s", (presc_id,))
         conn.commit()
         
         cur.close()
@@ -116,7 +120,7 @@ def get_prescription():
     except Exception as e:
         return jsonify({'found': False, 'message': str(e)}), 500
 
-# --- API 4: INPUT ITEM MANUAL (FIXED: NO DRUGS, ONLY ICD) ---
+# --- API 4: INPUT ITEM MANUAL (ICD-9 & ICD-10) ---
 @app.route('/api/master-data', methods=['GET'])
 def search_master_data():
     query = request.args.get('q', '').lower()
@@ -129,22 +133,24 @@ def search_master_data():
         results = []
         
         # 1. Cari ICD-10 (Diagnosa)
-        cur.execute("""
-            SELECT name, price, 'icd10' as type, code 
-            FROM tariff_icd10 
-            WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
-        """, (search_term, search_term))
-        results.extend(cur.fetchall())
+        try:
+            cur.execute("""
+                SELECT name, price, 'icd10' as type, code 
+                FROM tariff_icd10 
+                WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
+            """, (search_term, search_term))
+            results.extend(cur.fetchall())
+        except Exception: pass
 
-        # 2. Cari ICD-9 (Prosedur/Tindakan) -> INI YANG BARU DITAMBAHKAN
-        cur.execute("""
-            SELECT name, price, 'icd9' as type, code 
-            FROM tariff_icd9 
-            WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
-        """, (search_term, search_term))
-        results.extend(cur.fetchall())
-        
-        # (OBAT SUDAH DIHAPUS DARI SINI)
+        # 2. Cari ICD-9 (Prosedur/Tindakan)
+        try:
+            cur.execute("""
+                SELECT name, price, 'icd9' as type, code 
+                FROM tariff_icd9 
+                WHERE name ILIKE %s OR code ILIKE %s LIMIT 5
+            """, (search_term, search_term))
+            results.extend(cur.fetchall())
+        except Exception: pass
 
         cur.close()
         conn.close()
@@ -178,7 +184,6 @@ def create_invoice():
             qty = int(item['qty'])
             subtotal = price * qty
             
-            # Type akan otomatis tersimpan sebagai 'icd10' atau 'icd9'
             cur.execute("""
                 INSERT INTO invoice_details (id, invoice_id, item_type, item_code, item_name, price, qty, subtotal)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
