@@ -71,7 +71,7 @@ def get_insurances():
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 3: TARIK RESEP (UPDATE: AMBIL PROCESSED -> UBAH JADI BILLED) ---
+# --- API 3: TARIK RESEP (UPDATE: HURUF KECIL 'processed' -> 'billed') ---
 @app.route('/api/get-prescription', methods=['GET'])
 def get_prescription():
     patient_id = request.args.get('patient_id')
@@ -81,17 +81,17 @@ def get_prescription():
     try:
         cur = conn.cursor()
         
-        # 1. Cari resep yang statusnya 'PROCESSED' (Siap Bayar)
+        # 1. Cari resep yang statusnya 'processed' (HURUF KECIL SESUAI DATABASE)
         cur.execute("""
             SELECT id FROM prescriptions 
-            WHERE patient_id = %s AND status = 'PROCESSED'
+            WHERE patient_id = %s AND status = 'processed'
             ORDER BY created_at DESC LIMIT 1
         """, (patient_id,))
         
         presc = cur.fetchone()
         
         if not presc:
-            return jsonify({'found': False, 'message': 'Tidak ada resep siap bayar (PROCESSED) untuk pasien ini.'})
+            return jsonify({'found': False, 'message': 'Tidak ada resep siap bayar (processed) untuk pasien ini.'})
 
         # 2. Ambil detail obat
         presc_id = presc['id']
@@ -109,8 +109,8 @@ def get_prescription():
         
         items = cur.fetchall()
         
-        # 3. Update status menjadi 'BILLED' agar tidak ditarik berulang kali
-        cur.execute("UPDATE prescriptions SET status = 'BILLED' WHERE id = %s", (presc_id,))
+        # 3. Update status menjadi 'billed' (HURUF KECIL JUGA BIAR KONSISTEN)
+        cur.execute("UPDATE prescriptions SET status = 'billed' WHERE id = %s", (presc_id,))
         conn.commit()
         
         cur.close()
