@@ -177,7 +177,7 @@ def create_invoice():
         invoice_id = str(uuid.uuid4())
         cur.execute("""
             INSERT INTO invoices (id, patient_id, status, created_at, total_amount)
-            VALUES (%s, %s, 'paid', NOW(), %s)
+            VALUES (%s, %s, 'unpaid', NOW(), %s)
         """, (invoice_id, patient_id, total_final))
         
         # 2. Detail Invoice
@@ -193,12 +193,6 @@ def create_invoice():
                 str(uuid.uuid4()), invoice_id, item.get('type', 'manual'),
                 item.get('code', '-'), item['name'], price, qty
             ))
-
-        # 3. Payment Record
-        cur.execute("""
-            INSERT INTO payments (id, invoice_id, amount, method, created_at)
-            VALUES (%s, %s, %s, 'CASH', NOW())
-        """, (str(uuid.uuid4()), invoice_id, total_final))
 
         conn.commit()
         cur.close()
