@@ -166,7 +166,8 @@
                     const opt = document.createElement('option');
                     opt.value = ins.id;
                     opt.text = ins.name;
-                    opt.dataset.pct = ins.pct;
+                    opt.dataset.pct = ins.pct; 
+                    opt.dataset.limit = ins.limit; // <--- TAMBAHKAN BARIS INI (Ambil Limit)
                     sel.add(opt);
                 });
             } catch(e) { console.error("Gagal load asuransi"); }
@@ -276,7 +277,10 @@
         function recalculate() {
             const container = document.getElementById('cart-container');
             const insuranceSel = document.getElementById('select-insurance');
+            
+            // 1. Ambil Persentase & Limit Plafon dari Dataset
             const pct = parseFloat(insuranceSel.options[insuranceSel.selectedIndex].dataset.pct || 0);
+            const limit = parseFloat(insuranceSel.options[insuranceSel.selectedIndex].dataset.limit || 0);
             
             container.innerHTML = '';
             let gross = 0; 
@@ -295,15 +299,18 @@
                 gross += subtotal;
 
                 let isCovered = false;
+                // Logika: ICD9/10 dicover, Obat Generik dicover.
                 if (item.type !== 'drug') { isCovered = true; } 
                 else if (item.drug_category === 'generik') { isCovered = true; }
 
-                if(isCovered && pct > 0) { cover += subtotal * (pct / 100); }
+                // Hitung Cover per Item
+                if(isCovered && pct > 0) { 
+                    cover += subtotal * (pct / 100); 
+                }
 
                 const showShield = (isCovered && pct > 0);
 
                 const row = document.createElement('div');
-                // COMPACT ROW STYLE
                 row.className = "flex justify-between items-center p-3 border-b bg-white item-row hover:bg-blue-50 transition-all";
                 row.innerHTML = `
                     <div class="flex-1">
@@ -326,6 +333,14 @@
                     </div>`;
                 container.appendChild(row);
             });
+            
+            // --- LOGIKA BARU: CEK PLAFON (LIMIT) ---
+            // Jika limit > 0 (bukan unlimited) DAN total cover melebihi limit
+            if (limit > 0 && cover > limit) {
+                cover = limit; // Mentokkan cover ke limit
+                // Opsional: Tampilkan warning kecil di console atau UI
+                console.log(`Cover dibatasi plafon: ${limit}`);
+            }
 
             const net = gross - cover;
             document.getElementById('lbl-gross').innerText = fmtMoney(gross);

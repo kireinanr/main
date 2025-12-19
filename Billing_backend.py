@@ -49,7 +49,7 @@ def search_patients():
     except Exception as e:
         return jsonify([]), 500
 
-# --- API 2: LIST ASURANSI ---
+# --- API 2: LIST ASURANSI (UPDATE: AMBIL PLAFON LIMIT) ---
 @app.route('/api/insurances', methods=['GET'])
 def get_insurances():
     conn = get_db_connection()
@@ -57,8 +57,13 @@ def get_insurances():
 
     try:
         cur = conn.cursor()
+        # Tambahkan 'ic.plafon_limit' dalam query
         cur.execute("""
-            SELECT i.id, i.name, COALESCE(ic.coverage_percentage, 0) as pct
+            SELECT 
+                i.id, 
+                i.name, 
+                COALESCE(ic.coverage_percentage, 0) as pct,
+                COALESCE(ic.plafon_limit, 0) as limit
             FROM insurances i
             LEFT JOIN insurance_coverages ic ON i.id = ic.insurance_id
             WHERE i.is_active = true 
